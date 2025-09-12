@@ -201,5 +201,6 @@ app.get('/health', (req, res) => {
   res.json({ status: 'OK', langchain: 'enabled' });
 });
 
-// Export for Vercel
-module.exports = app;
+const serverless = require('serverless-http');
+module.exports = serverless(app);
+
