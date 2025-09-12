@@ -12,7 +12,9 @@ const { StringOutputParser } = require('@langchain/core/output_parsers');
 const { ChatPromptTemplate } = require('@langchain/core/prompts');
 
 const app = express();
-app.use(cors());
+
+// Allow all origins for CORS
+app.use(cors()); // This enables CORS for all origins (*)
 app.use(express.json());
 
 const upload = multer({ dest: 'uploads/' });
@@ -199,7 +201,5 @@ app.get('/health', (req, res) => {
   res.json({ status: 'OK', langchain: 'enabled' });
 });
 
-const PORT = process.env.PORT || 5000;
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`Server running on port ${PORT}`);
-});
+// Export for Vercel
+module.exports = app;
