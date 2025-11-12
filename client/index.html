@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>LLM Configuration Manager</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="container">
+      <div class="header">
+        <h1>🤖 LLM Configuration Manager</h1>
+        <p>View and update your AI model settings</p>
+      </div>
+
+      <div class="content">
+        <div id="alert" class="alert"></div>
+        <div id="loading" class="loading">
+          <div class="spinner"></div>
+          <p>Loading...</p>
+        </div>
+
+        <div class="info-box">
+          <h3>ℹ️ Current Configuration</h3>
+          <p>
+            Modify the settings below to customize your LLM behavior. Changes
+            take effect immediately after saving.
+          </p>
+        </div>
+
+        <form id="configForm">
+          <div class="form-group">
+            <label for="modelName">Model Name</label>
+            <select id="modelName" required>
+              <optgroup label="GPT-5 Series (Temp=1 Only, No topP)">
+                <option value="gpt-5">GPT-5 ⚠️</option>
+                <option value="gpt-5-mini">GPT-5 Mini ⚠️</option>
+                <option value="gpt-5-nano">GPT-5 Nano ⚠️</option>
+                <option value="gpt-5-pro">GPT-5 Pro ⚠️</option>
+                <option value="gpt-5-codex">GPT-5 Codex ⚠️</option>
+                <option value="gpt-5-chat-latest">GPT-5 Chat ⚠️</option>
+              </optgroup>
+              <optgroup label="GPT-4o Series">
+                <option value="gpt-4o">GPT-4o (Multimodal, Fast)</option>
+                <option value="gpt-4o-mini">
+                  GPT-4o Mini (Cost-effective)
+                </option>
+                <option value="gpt-4o-2024-11-20">GPT-4o (Nov 2024)</option>
+                <option value="gpt-4o-2024-08-06">GPT-4o (Aug 2024)</option>
+                <option value="gpt-4o-2024-05-13">GPT-4o (May 2024)</option>
+                <option value="gpt-4o-mini-2024-07-18">
+                  GPT-4o Mini (July 2024)
+                </option>
+                <option value="chatgpt-4o-latest">ChatGPT-4o Latest</option>
+              </optgroup>
+              <optgroup label="GPT-4 Turbo">
+                <option value="gpt-4-turbo">GPT-4 Turbo (Latest)</option>
+                <option value="gpt-4-turbo-2024-04-09">
+                  GPT-4 Turbo (Apr 2024)
+                </option>
+                <option value="gpt-4-turbo-preview">GPT-4 Turbo Preview</option>
+                <option value="gpt-4-0125-preview">
+                  GPT-4 Turbo (Jan 2024)
+                </option>
+                <option value="gpt-4-1106-preview">
+                  GPT-4 Turbo (Nov 2023)
+                </option>
+                <option value="gpt-4-vision-preview">
+                  GPT-4 Vision Preview
+                </option>
+              </optgroup>
+              <optgroup label="GPT-4 Standard">
+                <option value="gpt-4">GPT-4 (Latest)</option>
+                <option value="gpt-4-0613">GPT-4 (June 2023)</option>
+                <option value="gpt-4-32k">GPT-4 32K Context</option>
+              </optgroup>
+              <optgroup label="GPT-3.5">
+                <option value="gpt-3.5-turbo">GPT-3.5 Turbo (Latest)</option>
+                <option value="gpt-3.5-turbo-0125">
+                  GPT-3.5 Turbo (Jan 2024)
+                </option>
+                <option value="gpt-3.5-turbo-1106">
+                  GPT-3.5 Turbo (Nov 2023)
+                </option>
+                <option value="gpt-3.5-turbo-16k">GPT-3.5 Turbo 16K</option>
+              </optgroup>
+              <optgroup label="O-Series (Reasoning - Temp=1 TopP=1 Only)">
+                <option value="o1">O1 ⚠️</option>
+                <option value="o1-preview">O1 Preview ⚠️</option>
+                <option value="o1-mini">O1 Mini ⚠️</option>
+                <option value="o3">O3 ⚠️</option>
+                <option value="o3-mini">O3 Mini ⚠️</option>
+                <option value="o3-pro">O3 Pro ⚠️</option>
+                <option value="o4-mini">O4 Mini ⚠️</option>
+              </optgroup>
+            </select>
+            <small id="modelWarning" style="color: #ff9800; display: none; margin-top: 5px;">
+              Model-specific parameter restrictions will be applied.
+            </small>
+            </select>
+            <small id="modelWarning" style="color: #ff9800; display: none; margin-top: 5px;">
+              ⚠️ This model only supports temperature=1 and topP=1. Values will be auto-adjusted.
+            </small>
+          </div>
+
+          <div class="form-group">
+            <label for="temperature"
+              >Temperature:
+              <span class="temperature-value" id="tempValue">0.3</span></label
+            >
+            <div class="slider-container">
+              <span>0</span>
+              <input
+                type="range"
+                id="temperature"
+                min="0"
+                max="2"
+                step="0.1"
+                value="0.3"
+              />
+              <span>2</span>
+            </div>
+            <small style="color: #666; display: block; margin-top: 5px">
+              Lower values = more focused/deterministic, Higher values = more
+              creative/random
+            </small>
+          </div>
+
+          <div class="form-group">
+            <label for="topP"
+              >Top P (Nucleus Sampling):
+              <span class="temperature-value" id="topPValue">1.0</span></label
+            >
+            <div class="slider-container">
+              <span>0</span>
+              <input
+                type="range"
+                id="topP"
+                min="0"
+                max="1"
+                step="0.01"
+                value="1.0"
+              />
+              <span>1</span>
+            </div>
+            <small style="color: #666; display: block; margin-top: 5px">
+              Controls diversity via nucleus sampling. Lower = more focused,
+              Higher = more diverse. Usually set to 1.0 when using temperature.
+            </small>
+          </div>
+
+          <div class="form-group">
+            <label for="systemPrompt">System Prompt</label>
+            <textarea
+              id="systemPrompt"
+              required
+              placeholder="Enter your system prompt here..."
+            ></textarea>
+          </div>
+
+          <div class="form-group">
+            <label class="toggle-label">
+              <input type="checkbox" id="streaming" checked />
+              <span class="toggle-switch"></span>
+              Enable Streaming
+            </label>
+            <small style="color: #666; display: block; margin-top: 5px">
+              Stream responses in real-time. Some models require organization verification for streaming.
+            </small>
+          </div>
+
+          <div class="button-group">
+            <button type="button" class="btn-secondary" onclick="loadConfig()">
+              🔄 Reload
+            </button>
+            <button type="button" class="btn-test" onclick="testConfig()">
+              🧪 Test Configuration
+            </button>
+            <button type="submit" class="btn-primary">💾 Save Changes</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <script src="app.js"></script>
+  </body>
+</html>

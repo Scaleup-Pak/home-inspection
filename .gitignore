@@ -34,5 +34,8 @@ yarn-error.*
 .env                # ✅ Add this
 .env*.local
 
+# LLM configuration (contains API keys)
+llm-config.json
+
 # typescript
 *.tsbuildinfo
