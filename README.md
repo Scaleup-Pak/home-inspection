@@ -5,20 +5,25 @@ AI-powered home inspection analysis with image processing capabilities.
 ## Setup
 
 1. **Install dependencies:**
+
    ```bash
    npm install
    ```
 
 2. **Set up environment variables:**
+
    ```bash
    cp .env.example .env
    ```
+
    Then edit `.env` and add your OpenAI API key:
+
    ```
    OPENAI_API_KEY=your_actual_api_key_here
    ```
 
 3. **Start the server:**
+
    ```bash
    node server.js
    ```

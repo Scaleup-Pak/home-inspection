@@ -14,10 +14,13 @@ const {
 } = require("@langchain/core/messages");
 const { StringOutputParser } = require("@langchain/core/output_parsers");
 const { ChatPromptTemplate } = require("@langchain/core/prompts");
+const Mustache = require("mustache");
 
 const app = express();
 app.use(cors());
-app.use(express.json());
+// Increase body size so clients can POST base64-encoded images in chat requests.
+// Base64 is larger than binary; set to a reasonable limit for development. Adjust in production.
+app.use(express.json({ limit: "15mb" }));
 
 const upload = multer({ dest: "uploads/" });
 
@@ -54,6 +57,7 @@ let llmConfig = {
   temperature: 0.3,
   topP: 1.0,
   systemPrompt: SYSTEM_PROMPT,
+  chatPrompt: null,
 };
 
 // Load persisted config if available
@@ -62,6 +66,8 @@ try {
     const raw = fs.readFileSync(CONFIG_PATH, "utf8");
     const parsed = JSON.parse(raw || "{}");
     llmConfig = Object.assign({}, llmConfig, parsed);
+    // Ensure new keys exist
+    llmConfig.chatPrompt = parsed.chatPrompt || null;
     console.log("Loaded LLM config from", CONFIG_PATH);
   }
 } catch (err) {
@@ -72,16 +78,19 @@ try {
 let llm;
 function initLlm() {
   try {
-    const modelLower = llmConfig.modelName ? llmConfig.modelName.toLowerCase() : '';
-    
+    const modelLower = llmConfig.modelName
+      ? llmConfig.modelName.toLowerCase()
+      : "";
+
     // Check if model is GPT-5 series (does not support topP)
-    const isGPT5Model = modelLower.includes('gpt-5') || 
-                       modelLower.includes('gpt-5-mini') ||
-                       modelLower.includes('gpt-5-nano') ||
-                       modelLower.includes('gpt-5-pro') ||
-                       modelLower.includes('gpt-5-codex') ||
-                       modelLower.includes('gpt-5-chat');
-    
+    const isGPT5Model =
+      modelLower.includes("gpt-5") ||
+      modelLower.includes("gpt-5-mini") ||
+      modelLower.includes("gpt-5-nano") ||
+      modelLower.includes("gpt-5-pro") ||
+      modelLower.includes("gpt-5-codex") ||
+      modelLower.includes("gpt-5-chat");
+
     // Build config object
     const llmInitConfig = {
       openAIApiKey: process.env.OPENAI_API_KEY,
@@ -90,17 +99,17 @@ function initLlm() {
       temperature: Number(llmConfig.temperature),
       systemPrompt: llmConfig.systemPrompt,
     };
-    
+
     // Only add topP if model supports it (not GPT-5 series)
     if (!isGPT5Model) {
       llmInitConfig.topP = Number(llmConfig.topP);
     }
-    
+
     llm = new ChatOpenAI(llmInitConfig);
-    
+
     const logMessage = `Initialized LLM with model: ${llmConfig.modelName} temperature: ${llmConfig.temperature}`;
     if (isGPT5Model) {
-      console.log(logMessage + ' (topP not supported by this model)');
+      console.log(logMessage + " (topP not supported by this model)");
     } else {
       console.log(logMessage + ` topP: ${llmConfig.topP}`);
     }
@@ -136,7 +145,16 @@ const chatPrompt = ChatPromptTemplate.fromMessages([
 app.use("/llm-config-ui", express.static(path.join(__dirname, "client")));
 
 app.use((err, req, res, next) => {
-  console.error(err.stack);
+  console.error(err.stack || err);
+  // Special handling for payload too large - body-parser throws this when exceeding express json limit
+  if (err && (err.type === "entity.too.large" || err.status === 413)) {
+    return res.status(413).json({
+      success: false,
+      error:
+        "Request entity too large. Try reducing image size or number of images, or increase the server JSON limit.",
+    });
+  }
+
   res.status(500).send("Something broke!");
 });
 
@@ -148,6 +166,38 @@ function createImageContent(base64Data, category, index) {
       url: `data:image/jpeg;base64,${base64Data}`,
     },
   };
+}
+
+// Render a prompt template using Mustache, with simple safeguards
+function renderPromptTemplate(template, variables = {}) {
+  try {
+    // Shorten report if it is too long to avoid token explosion
+    if (variables.report && variables.report.length > 8000) {
+      variables.report =
+        variables.report.substring(0, 8000) + "\n\n[TRUNCATED]";
+    }
+
+    // Provide a stringified images list helper
+    if (Array.isArray(variables.images)) {
+      const imagesArr = variables.images;
+      variables.images = imagesArr
+        .map((img, idx) => {
+          if (!img) return "";
+          const category = img.category || "unknown";
+          const uri =
+            img.uri || img.url || (img.base64 ? "[base64 image]" : "unknown");
+          return `Image ${idx + 1}: category=${category}, uri=${uri}`;
+        })
+        .join("\n");
+      variables.imagesList = variables.images;
+      variables.imageCount = imagesArr.length || 0;
+    }
+
+    return Mustache.render(template || "", variables);
+  } catch (err) {
+    console.warn("Prompt templating error:", err);
+    return template; // fallback if templating fails
+  }
 }
 // Ensure llmConfig has a systemPrompt (default to the built-in SYSTEM_PROMPT)
 if (!llmConfig.systemPrompt) {
@@ -212,7 +262,7 @@ app.post("/api/analyze", upload.array("photo"), async (req, res) => {
     });
   } catch (error) {
     console.error("Analysis error:", error);
-    
+
     // Clean up uploaded files even on error
     if (req.files) {
       req.files.forEach((file) => {
@@ -223,38 +273,55 @@ app.post("/api/analyze", upload.array("photo"), async (req, res) => {
         }
       });
     }
-    
+
     // Parse error for user-friendly message
     let errorMessage = error.message || "Unknown error occurred";
-    
+
     if (error.status === 400) {
-      if (error.code === 'unsupported_value' && error.param === 'stream') {
-        errorMessage = "⚠️ ORGANIZATION VERIFICATION REQUIRED\n\n" +
+      if (error.code === "unsupported_value" && error.param === "stream") {
+        errorMessage =
+          "⚠️ ORGANIZATION VERIFICATION REQUIRED\n\n" +
           "Your organization must be verified to use streaming with this model.\n\n" +
           "Please go to: https://platform.openai.com/settings/organization/general\n" +
           "Click on 'Verify Organization'\n\n" +
           "If you just verified, it can take up to 15 minutes for access to propagate.\n\n" +
           "TIP: You can disable streaming in the LLM Configuration UI to use this model immediately.";
-      } else if (error.code === 'unsupported_value' && error.param === 'temperature') {
+      } else if (
+        error.code === "unsupported_value" &&
+        error.param === "temperature"
+      ) {
         errorMessage = `This model only supports temperature=1. Current configuration: ${llmConfig.temperature}`;
-      } else if (error.code === 'unsupported_parameter' && error.param === 'top_p') {
+      } else if (
+        error.code === "unsupported_parameter" &&
+        error.param === "top_p"
+      ) {
         errorMessage = `This model does not support the top_p parameter.`;
       }
     } else if (error.status === 401) {
-      errorMessage = "Invalid API key. Please check your OpenAI API key in .env file.";
+      errorMessage =
+        "Invalid API key. Please check your OpenAI API key in .env file.";
     } else if (error.status === 429) {
       errorMessage = "Rate limit exceeded. Please wait a moment and try again.";
     } else if (error.status === 503) {
-      errorMessage = "OpenAI service is temporarily unavailable. Please try again later.";
+      errorMessage =
+        "OpenAI service is temporarily unavailable. Please try again later.";
     }
-    
+
     res.status(error.status || 500).send("Analysis failed:\n\n" + errorMessage);
   }
 });
 
 app.post("/api/chat", async (req, res) => {
   try {
-    const { message, systemPrompt, context, conversationHistory } = req.body;
+    const {
+      message,
+      systemPrompt,
+      context,
+      conversationHistory,
+      images,
+      promptOverride,
+    } = req.body;
+    req.body;
 
     console.log("Received chat request:", {
       message: message?.substring(0, 50) + (message?.length > 50 ? "..." : ""),
@@ -263,6 +330,7 @@ app.post("/api/chat", async (req, res) => {
         (systemPrompt?.length > 50 ? "..." : ""),
       context: context?.substring(0, 50) + (context?.length > 50 ? "..." : ""),
       conversationHistoryLength: (conversationHistory || []).length,
+      imagesCount: Array.isArray(images) ? images.length : 0,
     });
 
     // Convert conversation history to LangChain message format
@@ -280,12 +348,143 @@ app.post("/api/chat", async (req, res) => {
       });
     }
 
-    // Create the chain
+    // Build template variables for prompt interpolation
+    const templateVariables = {
+      report: context || "",
+      images: images || [],
+    };
+
+    // Resolve system prompt priority: promptOverride > server chatPrompt > client systemPrompt > llmConfig
+    let resolvedSystemPrompt = systemPrompt;
+    if (promptOverride) {
+      resolvedSystemPrompt = renderPromptTemplate(
+        promptOverride,
+        templateVariables
+      );
+      console.log("Using promptOverride");
+    } else if (llmConfig.chatPrompt) {
+      resolvedSystemPrompt = renderPromptTemplate(
+        llmConfig.chatPrompt || "",
+        templateVariables
+      );
+      console.log("Using server configured chatPrompt");
+    }
+    // fallback to client-provided or persisted
+    resolvedSystemPrompt =
+      resolvedSystemPrompt || llmConfig.systemPrompt || SYSTEM_PROMPT;
+
+    // If the client provided images, convert them to image contents
+    // Accept image items as either:
+    // - strings that are data URLs (data:image/...), or
+    // - objects with { base64 } or { url } fields
+    let imageContents = [];
+    if (Array.isArray(images) && images.length) {
+      imageContents = images
+        .map((img, idx) => {
+          if (!img) return null;
+          if (typeof img === "string") {
+            // already data URL?
+            if (img.startsWith("data:")) {
+              return {
+                type: "image_url",
+                image_url: { url: img },
+              };
+            }
+            // assume it's a base64 string
+            return createImageContent(img, `Chat Image ${idx + 1}`, idx);
+          }
+          if (typeof img === "object") {
+            if (img.url) {
+              return {
+                type: "image_url",
+                image_url: { url: img.url },
+              };
+            }
+            if (img.base64) {
+              return createImageContent(
+                img.base64,
+                `Chat Image ${idx + 1}`,
+                idx
+              );
+            }
+          }
+          return null;
+        })
+        .filter(Boolean);
+    }
+
+    // If images provided: use a direct ChatOpenAI request with image content included
+    if (imageContents.length > 0) {
+      // Build message array including images with the current user message.
+      const messages = [
+        new SystemMessage(resolvedSystemPrompt),
+        ...historyMessages,
+        new HumanMessage({
+          content: [
+            { type: "text", text: (message || "").toString() },
+            ...imageContents,
+          ],
+        }),
+      ];
+
+      // Stream the response back (vision models will process image_url)
+      res.setHeader("Content-Type", "text/plain");
+      res.setHeader("Transfer-Encoding", "chunked");
+
+      try {
+        const stream = await llm.stream(messages);
+        for await (const chunk of stream) {
+          // llm.stream yields chunk.content
+          res.write(chunk.content || "");
+        }
+        res.end();
+        return;
+      } catch (err) {
+        console.error("Chat with images error:", err);
+
+        // handle known OpenAI errors for images
+        let errorMessage = err.message || "Unknown error";
+        if (
+          err.message &&
+          err.message.includes("image_url is only supported by certain models")
+        ) {
+          errorMessage =
+            "❌ This model does NOT support vision/image analysis. " +
+            "Please select a vision-capable model (e.g. gpt-4o, gpt-4o-mini, gpt-4-vision-preview). " +
+            "Original error: " +
+            err.message;
+        } else if (
+          err.status === 400 &&
+          err.code === "unsupported_value" &&
+          err.param === "stream"
+        ) {
+          errorMessage =
+            "⚠️ ORGANIZATION VERIFICATION REQUIRED FOR STREAMING.\n" +
+            "Go to https://platform.openai.com/settings/organization/general to verify your organization, or disable streaming in the configuration to proceed.";
+        }
+
+        // Provide JSON for frontend to display errors clearly
+        const errorResponse = {
+          success: false,
+          error: errorMessage,
+          errorType: err.type || "unknown",
+          errorCode: err.code || null,
+          parameter: err.param || null,
+          details: err.response?.data || null,
+        };
+        return res.status(err.status || 500).json(errorResponse);
+      }
+    }
+
+    // No images: follow the previous chat flow with prompt pipeline
     const chain = chatPrompt.pipe(llm).pipe(outputParser);
 
-    // Prepare the input
     const chainInput = {
-      systemPrompt: (systemPrompt || llmConfig.systemPrompt || "").toString(),
+      systemPrompt: (
+        resolvedSystemPrompt ||
+        llmConfig.systemPrompt ||
+        ""
+      ).toString(),
       context: (context || "").toString(),
       conversationHistory: historyMessages,
       message: (message || "").toString(),
@@ -298,23 +497,29 @@ app.post("/api/chat", async (req, res) => {
       messageLength: chainInput.message.length,
     });
 
-    // Set up streaming response
+    // Stream the response using LangChain (no images)
     res.setHeader("Content-Type", "text/plain");
     res.setHeader("Transfer-Encoding", "chunked");
 
-    // Stream the response using LangChain
     const stream = await chain.stream(chainInput);
-
     for await (const chunk of stream) {
       res.write(chunk || "");
     }
-
     res.end();
   } catch (error) {
     console.error("Chat error:", error);
     const errorMessage =
       error.response?.data?.error?.message || error.message || "Unknown error";
-    res.status(500).send("Chat failed: " + errorMessage);
+
+    // Provide descriptive JSON so frontend can show the actual OpenAI error
+    res.status(error.status || 500).json({
+      success: false,
+      error: errorMessage,
+      errorType: error.type || "unknown",
+      errorCode: error.code || null,
+      parameter: error.param || null,
+      details: error.response?.data || null,
+    });
   }
 });
 
@@ -349,6 +554,7 @@ app.put("/api/llm-config", express.json(), async (req, res) => {
       "topP",
       "streaming",
       "openAIApiKey",
+      "chatPrompt",
     ];
     const updates = {};
 
@@ -368,6 +574,13 @@ app.put("/api/llm-config", express.json(), async (req, res) => {
       return res
         .status(400)
         .json({ success: false, error: "systemPrompt must be a string" });
+    }
+    if (updates.chatPrompt !== undefined) {
+      if (typeof updates.chatPrompt !== "string") {
+        return res
+          .status(400)
+          .json({ success: false, error: "chatPrompt must be a string" });
+      }
     }
     if (updates.temperature !== undefined) {
       const t = Number(updates.temperature);
@@ -395,24 +608,26 @@ app.put("/api/llm-config", express.json(), async (req, res) => {
 
     // Model-specific validation
     const modelName = updates.modelName || llmConfig.modelName;
-    const modelLower = modelName ? modelName.toLowerCase() : '';
-    
+    const modelLower = modelName ? modelName.toLowerCase() : "";
+
     // O-series models: Only support temperature=1 and topP=1
-    const isOSeriesModel = modelLower.includes('o1') || 
-                          modelLower.includes('o1-preview') || 
-                          modelLower.includes('o1-mini') ||
-                          modelLower.includes('o3') ||
-                          modelLower.includes('o3-mini') ||
-                          modelLower.includes('o3-pro') ||
-                          modelLower.includes('o4-mini');
-    
+    const isOSeriesModel =
+      modelLower.includes("o1") ||
+      modelLower.includes("o1-preview") ||
+      modelLower.includes("o1-mini") ||
+      modelLower.includes("o3") ||
+      modelLower.includes("o3-mini") ||
+      modelLower.includes("o3-pro") ||
+      modelLower.includes("o4-mini");
+
     // GPT-5 series models: Only support temperature=1, do NOT support topP parameter
-    const isGPT5Model = modelLower.includes('gpt-5') || 
-                       modelLower.includes('gpt-5-mini') ||
-                       modelLower.includes('gpt-5-nano') ||
-                       modelLower.includes('gpt-5-pro') ||
-                       modelLower.includes('gpt-5-codex') ||
-                       modelLower.includes('gpt-5-chat');
+    const isGPT5Model =
+      modelLower.includes("gpt-5") ||
+      modelLower.includes("gpt-5-mini") ||
+      modelLower.includes("gpt-5-nano") ||
+      modelLower.includes("gpt-5-pro") ||
+      modelLower.includes("gpt-5-codex") ||
+      modelLower.includes("gpt-5-chat");
 
     if (isOSeriesModel) {
       // O-series models only support temperature=1 and topP=1
@@ -449,7 +664,9 @@ app.put("/api/llm-config", express.json(), async (req, res) => {
       }
       // Remove topP from updates - not supported by GPT-5
       if (updates.topP !== undefined) {
-        console.warn(`topP parameter is not supported for ${modelName}, removing from config`);
+        console.warn(
+          `topP parameter is not supported for ${modelName}, removing from config`
+        );
         delete updates.topP;
       }
     }
@@ -489,15 +706,15 @@ app.put("/api/llm-config", express.json(), async (req, res) => {
 app.post("/api/llm-config/test", express.json(), async (req, res) => {
   try {
     const testConfig = req.body;
-    
+
     // Validate required fields
     if (!testConfig.modelName) {
       return res.status(400).json({
         success: false,
-        error: "Model name is required for testing"
+        error: "Model name is required for testing",
       });
     }
-    
+
     // Build test LLM config - send EXACTLY what user configured
     const testLlmConfig = {
       openAIApiKey: process.env.OPENAI_API_KEY,
@@ -506,109 +723,123 @@ app.post("/api/llm-config/test", express.json(), async (req, res) => {
       temperature: Number(testConfig.temperature) || 0.7,
       topP: Number(testConfig.topP) || 1.0,
     };
-    
+
     console.log("Testing LLM configuration with user settings:", {
       model: testConfig.modelName,
       temperature: testLlmConfig.temperature,
       topP: testLlmConfig.topP,
-      streaming: testLlmConfig.streaming
+      streaming: testLlmConfig.streaming,
     });
-    
+
     // Create a test LLM instance with user's exact configuration
     const testLlm = new ChatOpenAI(testLlmConfig);
-    
+
     // Test with vision capability (image_url) since this is a home inspection app
     // Use a simple base64 test image (1x1 transparent PNG)
-    const testImageBase64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
-    
+    const testImageBase64 =
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
+
     const testMessages = [
-      new SystemMessage(testConfig.systemPrompt || "You are a helpful assistant."),
+      new SystemMessage(
+        testConfig.systemPrompt || "You are a helpful assistant."
+      ),
       new HumanMessage({
         content: [
           {
             type: "text",
-            text: "This is a test. Respond with: 'Configuration test successful - Vision supported'"
+            text: "This is a test. Respond with: 'Configuration test successful - Vision supported'",
           },
           {
             type: "image_url",
             image_url: {
-              url: `data:image/png;base64,${testImageBase64}`
-            }
-          }
-        ]
-      })
+              url: `data:image/png;base64,${testImageBase64}`,
+            },
+          },
+        ],
+      }),
     ];
-    
+
     // Test the configuration with a timeout
-    const timeout = new Promise((_, reject) => 
-      setTimeout(() => reject(new Error('Request timed out after 15 seconds')), 15000)
+    const timeout = new Promise((_, reject) =>
+      setTimeout(
+        () => reject(new Error("Request timed out after 15 seconds")),
+        15000
+      )
     );
-    
+
     // Test based on streaming setting
     let response;
     if (testLlmConfig.streaming) {
-      const stream = await Promise.race([testLlm.stream(testMessages), timeout]);
-      let content = '';
+      const stream = await Promise.race([
+        testLlm.stream(testMessages),
+        timeout,
+      ]);
+      let content = "";
       for await (const chunk of stream) {
-        content += chunk.content || '';
+        content += chunk.content || "";
       }
       response = { content };
     } else {
       response = await Promise.race([testLlm.invoke(testMessages), timeout]);
     }
-    
+
     console.log("✅ Test successful for model:", testConfig.modelName);
-    
+
     // Return actual response from ChatGPT
     res.json({
       success: true,
-      message: "✅ Configuration is working! Model supports vision (image analysis).",
+      message:
+        "✅ Configuration is working! Model supports vision (image analysis).",
       response: response.content || response.text || "Test completed",
       config: {
         model: testConfig.modelName,
         temperature: testLlmConfig.temperature,
         topP: testLlmConfig.topP,
-        streaming: testLlmConfig.streaming
-      }
+        streaming: testLlmConfig.streaming,
+      },
     });
-    
   } catch (error) {
     console.error("❌ Test configuration failed:", error);
-    
+
     // Return the ACTUAL error from OpenAI
     let errorMessage = error.message || "Unknown error occurred";
-    
+
     // Add helpful context for vision-related errors
-    if (error.message && error.message.includes("image_url is only supported by certain models")) {
-      errorMessage = "❌ This model does NOT support vision/image analysis.\n\n" +
+    if (
+      error.message &&
+      error.message.includes("image_url is only supported by certain models")
+    ) {
+      errorMessage =
+        "❌ This model does NOT support vision/image analysis.\n\n" +
         "This app requires image analysis for home inspections. " +
         "Please select a vision-capable model like:\n" +
         "• GPT-4o (recommended)\n" +
         "• GPT-4o-mini\n" +
         "• GPT-4 Turbo with Vision\n" +
         "• GPT-4 Vision Preview\n\n" +
-        "Original error: " + error.message;
+        "Original error: " +
+        error.message;
     }
-    
+
     const errorResponse = {
       success: false,
       error: errorMessage,
       errorType: error.type || "unknown",
       errorCode: error.code || "unknown",
       statusCode: error.status || 500,
-      isVisionError: error.message && error.message.includes("image_url")
+      isVisionError: error.message && error.message.includes("image_url"),
     };
-    
+
     // Add parameter info if available
     if (error.param) {
       errorResponse.parameter = error.param;
     }
-    
+
     // Include full error details for debugging
     if (error.response?.data) {
       errorResponse.details = error.response.data;
     }
-    
+
     res.status(error.status || 500).json(errorResponse);
   }
 });

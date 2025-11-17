@@ -13,6 +13,7 @@ This folder contains the client-side web interface for managing LLM configuratio
 ### Option 1: Open Directly in Browser
 
 1. Make sure your server is running:
+
    ```bash
    node server.js
    ```
@@ -25,7 +26,7 @@ Add this to your `server.js`:
 
 ```javascript
 // Serve static files from client folder
-app.use('/config-ui', express.static(path.join(__dirname, 'client')));
+app.use("/config-ui", express.static(path.join(__dirname, "client")));
 ```
 
 Then access at: `http://localhost:5000/config-ui`
@@ -73,7 +74,8 @@ Then open: `http://localhost:8080`
 
 ## Security Notes
 
-⚠️ **Important**: 
+⚠️ **Important**:
+
 - The API key field saves to the server's `llm-config.json` file
 - Add `llm-config.json` to your `.gitignore`
 - Consider adding authentication for production use
@@ -84,8 +86,9 @@ Then open: `http://localhost:8080`
 ### Change API URL
 
 Edit `app.js`:
+
 ```javascript
-const API_BASE_URL = 'https://your-api-domain.com';
+const API_BASE_URL = "https://your-api-domain.com";
 ```
 
 ### Modify Styling
@@ -95,6 +98,7 @@ Edit `styles.css` to change colors, fonts, and layout.
 ### Add More Models
 
 Edit `index.html` to add more model options:
+
 ```html
 <option value="gpt-4-turbo-preview">GPT-4 Turbo Preview</option>
 ```
@@ -102,16 +106,19 @@ Edit `index.html` to add more model options:
 ## Troubleshooting
 
 **Issue: Can't connect to server**
+
 - Verify server is running on port 5000
 - Check `API_BASE_URL` in `app.js`
 - Ensure CORS is enabled on server
 
 **Issue: Changes not saving**
+
 - Check browser console for errors
 - Verify all required fields are filled
 - Check server logs for errors
 
 **Issue: Blank page**
+
 - Open browser console (F12) to see errors
 - Ensure all files (index.html, styles.css, app.js) are in the same folder
 
@@ -125,6 +132,7 @@ Edit `index.html` to add more model options:
 ## Development
 
 To modify the UI:
+
 1. Edit HTML structure in `index.html`
 2. Update styles in `styles.css`
 3. Modify functionality in `app.js`

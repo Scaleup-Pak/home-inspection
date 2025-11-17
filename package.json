@@ -19,6 +19,7 @@
     "express": "^5.1.0",
     "multer": "^2.0.2",
     "openai": "^5.19.1",
+    "mustache": "^4.2.0",
     "serverless-http": "^4.0.0",
     "vercel": "^47.1.4"
   }
