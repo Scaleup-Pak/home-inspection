@@ -52,4 +52,21 @@ AI-powered home inspection analysis with image processing capabilities.
 
 - API keys are stored in `.env` (never committed)
 - Configuration persisted to `llm-config.json` (without API keys)
+  
+## Restoring `llm-config.json`
+
+If `llm-config.json` was accidentally deleted, recreate it at the project root with the following default values (do not add your OpenAI API key here - see notes):
+
+```json
+{
+   "modelName": "gpt-4o-mini",
+   "streaming": true,
+   "temperature": 0.3,
+   "topP": 1.0,
+   "systemPrompt": "Your system prompt text...",
+   "chatPrompt": null
+}
+```
+
+The server will default the `systemPrompt` to the built-in professional home-inspection prompt if you omit it. Always keep `llm-config.json` listed in `.gitignore` to avoid pushing secrets.
 - GitHub push protection prevents accidental key exposure

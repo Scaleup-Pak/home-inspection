@@ -74,9 +74,9 @@ Then open: `http://localhost:8080`
 
 ## Security Notes
 
-⚠️ **Important**:
+- ⚠️ **Important**:
 
-- The API key field saves to the server's `llm-config.json` file
+- The LLM config UI accepts an API key for testing, but the server does *not* save API keys to `llm-config.json`; keys should be stored in `.env` as `OPENAI_API_KEY` for production or safer local testing. The server removes `openAIApiKey` before persisting the config to disk.
 - Add `llm-config.json` to your `.gitignore`
 - Consider adding authentication for production use
 - CORS is currently open - restrict it for production

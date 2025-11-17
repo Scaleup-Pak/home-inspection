@@ -98,6 +98,7 @@ function initLlm() {
       streaming: Boolean(llmConfig.streaming),
       temperature: Number(llmConfig.temperature),
       systemPrompt: llmConfig.systemPrompt,
+      chatPrompt: llmConfig.chatPrompt,
     };
 
     // Only add topP if model supports it (not GPT-5 series)
